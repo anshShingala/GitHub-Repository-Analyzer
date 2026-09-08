@@ -1,7 +1,12 @@
 import json
+import logging
 from typing import Any, Dict, List
 from fastapi import HTTPException, status
+from google import genai
+from google.genai import types
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_INSTRUCTION = """You are an expert automated senior code reviewer auditing pull request code changes.
 Your task is to analyze the provided source files for software bugs, security vulnerabilities, performance bottlenecks, and maintainability issues.
@@ -78,44 +83,58 @@ class GeminiService:
     ) -> Dict[str, Any]:
         """Invoke Gemini model for automated code review (ONE-GEMINI-CALL Invariant)."""
         prompt = self.format_source_prompt(files_source, categories, commit_sha)
+        total_source_chars = sum(len(f.get("content", "")) for f in files_source)
 
         if not self.api_key:
-            # Fallback for unit testing / unconfigured environment
+            logger.info("Gemini API key unconfigured; returning empty findings fallback for test mode.")
             return {"findings": []}
 
-        try:
-            import google.generativeai as genai
+        logger.info(
+            f"Initiating ONE-GEMINI-CALL inference: model='{self.model_name}', "
+            f"file_count={len(files_source)}, total_chars={total_source_chars}"
+        )
 
-            genai.configure(api_key=self.api_key)
-            model = genai.GenerativeModel(
-                model_name=self.model_name,
+        try:
+            client = genai.Client(api_key=self.api_key)
+            config = types.GenerateContentConfig(
                 system_instruction=SYSTEM_INSTRUCTION,
+                temperature=0.2,
+                response_mime_type="application/json",
             )
 
             # Exactly ONE model invocation with JSON response constraint
-            response = model.generate_content(
-                prompt,
-                generation_config={"temperature": 0.2, "response_mime_type": "application/json"},
+            response = client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config=config,
             )
 
             response_text = response.text
             if not response_text:
+                logger.warning("Gemini API returned empty response text.")
                 return {"findings": []}
 
+            logger.info(f"Gemini API inference completed: response_length={len(response_text)}")
             parsed = json.loads(response_text)
             if isinstance(parsed, dict) and "findings" in parsed:
+                raw_count = len(parsed["findings"]) if isinstance(parsed["findings"], list) else 0
+                logger.info(f"Successfully parsed structured JSON response: raw_findings_count={raw_count}")
                 return parsed
+            logger.warning("Parsed JSON response missing 'findings' array key.")
             return {"findings": []}
 
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as err:
+            logger.error(f"Gemini response JSON decode failure: {err}")
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Gemini API returned malformed JSON response.",
-            )
+            ) from err
         except Exception as exc:
             if isinstance(exc, HTTPException):
                 raise exc
+            sanitized_msg = str(exc)
+            logger.error(f"Gemini API service exception ({exc.__class__.__name__}): {sanitized_msg}")
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Gemini API service error: {str(exc)}",
+                detail=f"Gemini API service error: {sanitized_msg}",
             ) from exc

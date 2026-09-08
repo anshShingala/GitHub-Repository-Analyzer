@@ -10,7 +10,7 @@ from app.services.review_engine import ReviewEngineService
 
 @pytest.fixture
 def mock_gemini_service():
-    return GeminiService(api_key="test-gemini-key", model_name="gemini-1.5-pro")
+    return GeminiService(api_key="test-gemini-key", model_name="gemini-2.5-flash")
 
 
 # 1. Gemini Prompt Formatting & Prompt Injection Defense
@@ -32,14 +32,14 @@ def test_gemini_service_format_source_prompt(mock_gemini_service) -> None:
 
 # 2. Unconfigured Gemini API Key Fallback
 def test_gemini_service_analyze_code_unconfigured_fallback() -> None:
-    service = GeminiService(api_key="", model_name="gemini-1.5-pro")
+    service = GeminiService(api_key="", model_name="gemini-2.5-flash")
     result = service.analyze_code([{"path": "a.py", "content": "print(1)"}], ["BUG"])
     assert result == {"findings": []}
 
 
 # 3 & 12. Mocked Gemini Success & ONE-CALL Invariant
 def test_gemini_service_analyze_code_mocked_gemini_success() -> None:
-    service = GeminiService(api_key="mock-key", model_name="gemini-1.5-pro")
+    service = GeminiService(api_key="mock-key", model_name="gemini-2.5-flash")
     mock_findings = {
         "findings": [
             {
@@ -57,36 +57,51 @@ def test_gemini_service_analyze_code_mocked_gemini_success() -> None:
     mock_response = MagicMock()
     mock_response.text = json.dumps(mock_findings)
 
-    with patch("google.generativeai.GenerativeModel") as mock_model_cls:
-        mock_model_instance = MagicMock()
-        mock_model_instance.generate_content.return_value = mock_response
-        mock_model_cls.return_value = mock_model_instance
+    with patch("google.genai.Client") as mock_client_cls:
+        mock_client_instance = MagicMock()
+        mock_client_instance.models.generate_content.return_value = mock_response
+        mock_client_cls.return_value = mock_client_instance
 
-        with patch("google.generativeai.configure"):
-            result = service.analyze_code([{"path": "a.py", "content": "secret = '123'"}], ["SECURITY"])
+        result = service.analyze_code([{"path": "a.py", "content": "secret = '123'"}], ["SECURITY"])
 
     assert result == mock_findings
     # ONE-GEMINI-CALL INVARIANT: generate_content called exactly ONCE
-    mock_model_instance.generate_content.assert_called_once()
+    mock_client_instance.models.generate_content.assert_called_once()
 
 
 # 4. Malformed JSON Response from Gemini
 def test_gemini_service_analyze_code_malformed_json_handling() -> None:
-    service = GeminiService(api_key="mock-key", model_name="gemini-1.5-pro")
+    service = GeminiService(api_key="mock-key", model_name="gemini-2.5-flash")
     mock_response = MagicMock()
     mock_response.text = "NOT_VALID_JSON"
 
-    with patch("google.generativeai.GenerativeModel") as mock_model_cls:
-        mock_model_instance = MagicMock()
-        mock_model_instance.generate_content.return_value = mock_response
-        mock_model_cls.return_value = mock_model_instance
+    with patch("google.genai.Client") as mock_client_cls:
+        mock_client_instance = MagicMock()
+        mock_client_instance.models.generate_content.return_value = mock_response
+        mock_client_cls.return_value = mock_client_instance
 
-        with patch("google.generativeai.configure"):
-            with pytest.raises(HTTPException) as exc_info:
-                service.analyze_code([{"path": "a.py", "content": "code"}], ["BUG"])
+        with pytest.raises(HTTPException) as exc_info:
+            service.analyze_code([{"path": "a.py", "content": "code"}], ["BUG"])
 
     assert exc_info.value.status_code == 502
     assert "malformed JSON" in exc_info.value.detail
+
+
+# 4b. Gemini API Exception Handling
+def test_gemini_service_analyze_code_api_exception_handling() -> None:
+    service = GeminiService(api_key="mock-key", model_name="gemini-2.5-flash")
+
+    with patch("google.genai.Client") as mock_client_cls:
+        mock_client_instance = MagicMock()
+        mock_client_instance.models.generate_content.side_effect = RuntimeError("Quota limit exceeded")
+        mock_client_cls.return_value = mock_client_instance
+
+        with pytest.raises(HTTPException) as exc_info:
+            service.analyze_code([{"path": "a.py", "content": "code"}], ["BUG"])
+
+    assert exc_info.value.status_code == 502
+    assert "Gemini API service error" in exc_info.value.detail
+    assert "Quota limit exceeded" in exc_info.value.detail
 
 
 # 5. Preflight Missing GitHub Connection Handled Cleanly
