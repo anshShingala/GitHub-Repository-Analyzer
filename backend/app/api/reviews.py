@@ -72,18 +72,19 @@ def _run_review_engine_background(
     review_id: str,
     repository_id: str | None = None,
     ref: str | None = None,
+    categories: List[str] | None = None,
 ) -> None:
     """Independent background execution helper for async review processing."""
     session_factory = get_sessionmaker()
     if not session_factory:
         review_engine_service.execute_review_engine(
-            review_id, db=None, repository_id=repository_id, ref=ref
+            review_id, db=None, categories_override=categories, repository_id=repository_id, ref=ref
         )
         return
     db = session_factory()
     try:
         review_engine_service.execute_review_engine(
-            review_id, db=db, repository_id=repository_id, ref=ref
+            review_id, db=db, categories_override=categories, repository_id=repository_id, ref=ref
         )
     except Exception as exc:
         try:
@@ -227,6 +228,7 @@ def create_review(
             new_mock_review["id"],
             request_data.repository_id,
             resolved_sha or request_data.ref,
+            categories=normalized_categories,
         )
         return new_mock_review
 
@@ -281,6 +283,7 @@ def create_review(
             str(new_review.id),
             request_data.repository_id,
             resolved_sha or request_data.ref,
+            categories=normalized_categories,
         )
         return {
             "id": str(new_review.id),

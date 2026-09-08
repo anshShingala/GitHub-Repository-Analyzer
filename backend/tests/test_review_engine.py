@@ -555,3 +555,107 @@ def test_review_engine_observability_valid_raw_findings(caplog) -> None:
     assert result.status == "COMPLETED"
     assert "raw_findings_count=1" in caplog.text
     assert "validated_findings_count=1" in caplog.text
+
+
+# 18. Category Selection Prompt Verification
+def test_review_engine_single_category_prompt_generation() -> None:
+    service = GeminiService(api_key="test-key")
+    prompt = service.format_source_prompt(
+        [{"path": "app.py", "content": "x = 1"}],
+        categories=["PERFORMANCE"],
+        commit_sha="abc",
+    )
+    assert "Requested Review Categories: PERFORMANCE" in prompt
+    assert "BUG" not in prompt
+
+
+# 19. Gemini System Instruction Mandatory Suggestion Rule Verification
+def test_gemini_system_instruction_requires_suggestion() -> None:
+    from app.services.gemini import SYSTEM_INSTRUCTION
+    assert "Mandatory Remediation Suggestions" in SYSTEM_INSTRUCTION
+    assert "Every reported finding MUST include a non-empty, actionable, concrete remediation suggestion" in SYSTEM_INSTRUCTION
+
+
+# 20. Finding With Suggestion Preserved Verification
+def test_review_engine_preserves_valid_suggestion() -> None:
+    engine = ReviewEngineService()
+    mock_gemini = MagicMock()
+    mock_gemini.analyze_code.return_value = {
+        "findings": [
+            {
+                "file_path": "a.py",
+                "line_number": 1,
+                "severity": "HIGH",
+                "category": "PERFORMANCE",
+                "title": "String Concatenation in Loop",
+                "message": "Use StringBuilder/join instead",
+                "suggestion": "Replace '+' with list append and join()",
+            }
+        ]
+    }
+    engine.gemini_service = mock_gemini
+
+    mock_db = MagicMock()
+    mock_review = MagicMock()
+    mock_review.id = uuid.uuid4()
+    mock_review.status = "PROCESSING"
+    mock_rf = MagicMock(file_path="a.py", status="PENDING")
+
+    mock_db.query.return_value.filter.return_value.first.side_effect = [
+        mock_review,
+        MagicMock(access_token_encrypted="enc"),
+    ]
+    mock_db.query.return_value.filter.return_value.all.return_value = [mock_rf]
+
+    with patch("app.services.review_engine.decrypt_credential_payload") as mock_decrypt:
+        mock_decrypt.return_value = {"access_token": "token"}
+        with patch.object(engine.github_service, "get_file_content") as mock_get_content:
+            mock_get_content.return_value = {"content": "for x in data:\n    s += str(x)\n", "encoding": "utf-8"}
+            result = engine.execute_review_engine(mock_review.id, db=mock_db, repository_id="o/r", ref="m", categories_override=["PERFORMANCE"])
+
+    assert result.status == "COMPLETED"
+    assert mock_db.add.call_count == 1
+    added = mock_db.add.call_args[0][0]
+    assert added.suggestion == "Replace '+' with list append and join()"
+
+
+# 21. Finding Without Suggestion Warning & Non-Rejection Verification
+def test_review_engine_missing_suggestion_emits_warning_not_rejected(caplog) -> None:
+    engine = ReviewEngineService()
+    mock_gemini = MagicMock()
+    mock_gemini.analyze_code.return_value = {
+        "findings": [
+            {
+                "file_path": "a.py",
+                "line_number": 1,
+                "severity": "HIGH",
+                "category": "PERFORMANCE",
+                "title": "Issue without suggestion",
+                "message": "Detailed description",
+            }
+        ]
+    }
+    engine.gemini_service = mock_gemini
+
+    mock_db = MagicMock()
+    mock_review = MagicMock()
+    mock_review.id = uuid.uuid4()
+    mock_review.status = "PROCESSING"
+    mock_rf = MagicMock(file_path="a.py", status="PENDING")
+
+    mock_db.query.return_value.filter.return_value.first.side_effect = [
+        mock_review,
+        MagicMock(access_token_encrypted="enc"),
+    ]
+    mock_db.query.return_value.filter.return_value.all.return_value = [mock_rf]
+
+    with patch("app.services.review_engine.decrypt_credential_payload") as mock_decrypt:
+        mock_decrypt.return_value = {"access_token": "token"}
+        with patch.object(engine.github_service, "get_file_content") as mock_get_content:
+            mock_get_content.return_value = {"content": "code\n", "encoding": "utf-8"}
+            with caplog.at_level("WARNING"):
+                result = engine.execute_review_engine(mock_review.id, db=mock_db, repository_id="o/r", ref="m")
+
+    assert result.status == "COMPLETED"
+    assert mock_db.add.call_count == 1
+    assert "rejection_reason='missing_suggestion'" in caplog.text

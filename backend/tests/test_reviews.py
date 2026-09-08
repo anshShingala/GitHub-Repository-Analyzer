@@ -386,3 +386,40 @@ def test_background_task_helper_execution() -> None:
         assert mock_exec.call_count == 1
 
 
+# 26. Category Propagation from API to Background Execution
+def test_create_review_propagates_categories_to_background_task(mock_github_sha) -> None:
+    from app.api.reviews import _run_review_engine_background, create_review, ReviewCreateRequest
+    from fastapi import BackgroundTasks
+    from app.db.models import User
+
+    bg_tasks = BackgroundTasks()
+    user = User(id=uuid.uuid4(), email="cat_test@example.com")
+    req = ReviewCreateRequest(
+        repository_id="owner/repo",
+        ref="main",
+        files=["src/app.py"],
+        categories=["PERFORMANCE"],
+    )
+    with patch("app.api.reviews._get_active_github_access_token", return_value="token"):
+        res = create_review(
+            request_data=req,
+            background_tasks=bg_tasks,
+            idempotency_key=str(uuid.uuid4()),
+            current_user=user,
+            db=None,
+        )
+
+    assert len(bg_tasks.tasks) == 1
+    task = bg_tasks.tasks[0]
+    assert task.func == _run_review_engine_background
+    assert task.kwargs.get("categories") == ["PERFORMANCE"]
+
+    with patch("app.services.review_engine.ReviewEngineService.execute_review_engine") as mock_exec:
+        _run_review_engine_background("fake-id", repository_id="owner/repo", ref="main", categories=["PERFORMANCE"])
+        mock_exec.assert_called_once_with(
+            "fake-id",
+            db=None,
+            categories_override=["PERFORMANCE"],
+            repository_id="owner/repo",
+            ref="main",
+        )

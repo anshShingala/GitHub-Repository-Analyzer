@@ -254,6 +254,14 @@ class ReviewEngineService:
                 )
                 continue
 
+            # Diagnostic Warning: Missing or empty suggestion (does not reject finding)
+            if not suggestion:
+                logger.warning(
+                    f"Finding missing suggestion: review_id='{review.id}', file_path='{file_path}', "
+                    f"line_number={line_num}, category='{category}', severity='{severity}', "
+                    f"rejection_reason='missing_suggestion'"
+                )
+
             # Deduplication Rule: Tuple (file_path, line_number, category, title)
             dedup_key = (file_path, line_num, category, title)
             if dedup_key in seen_dedup_keys:

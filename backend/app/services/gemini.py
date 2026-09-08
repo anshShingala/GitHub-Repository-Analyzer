@@ -19,7 +19,9 @@ RULES:
    - severity MUST be one of: CRITICAL, HIGH, MEDIUM, LOW.
 4. Line Numbers:
    - line_number MUST refer to a valid line number in the corresponding source file.
-5. Output Schema Enforcement:
+5. Mandatory Remediation Suggestions:
+   - Every reported finding MUST include a non-empty, actionable, concrete remediation suggestion or code-level fix example.
+6. Output Schema Enforcement:
    - You MUST return a single valid JSON object strictly adhering to this structure:
      {
        "findings": [
@@ -30,7 +32,7 @@ RULES:
            "category": "BUG|SECURITY|PERFORMANCE|MAINTAINABILITY",
            "title": "Short concise summary",
            "message": "Detailed explanation of the issue.",
-           "suggestion": "Optional proposed fix or code example."
+           "suggestion": "Required actionable proposed code fix, refactored snippet, or concrete remediation example."
          }
        ]
      }
