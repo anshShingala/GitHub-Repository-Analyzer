@@ -350,3 +350,95 @@ def test_gemini_api_key_sanitization_settings_fallback() -> None:
     with patch("app.core.config.settings.GEMINI_API_KEY", "  key_from_settings\n "):
         service = GeminiService(api_key=None)
         assert service.api_key == "key_from_settings"
+
+
+# 16. ReviewFile Lifecycle & Finding Field Mapping Verification
+def test_review_file_lifecycle_and_finding_field_mapping() -> None:
+    engine = ReviewEngineService()
+    mock_gemini = MagicMock()
+    mock_gemini.analyze_code.return_value = {
+        "findings": [
+            {
+                "file_path": "src/app.py",
+                "line_number": 2,
+                "severity": "CRITICAL",
+                "category": "SECURITY",
+                "title": "SQL Injection",
+                "message": "Unsanitized user query execution",
+                "suggestion": "Use parameterized query",
+            }
+        ]
+    }
+    engine.gemini_service = mock_gemini
+
+    mock_db = MagicMock()
+    mock_review = MagicMock()
+    mock_review.id = uuid.uuid4()
+    mock_review.status = "PROCESSING"
+    mock_rf = MagicMock(file_path="src/app.py", status="PENDING")
+
+    mock_db.query.return_value.filter.return_value.first.side_effect = [
+        mock_review,
+        MagicMock(access_token_encrypted="enc"),
+    ]
+    mock_db.query.return_value.filter.return_value.all.return_value = [mock_rf]
+
+    with patch("app.services.review_engine.decrypt_credential_payload") as mock_decrypt:
+        mock_decrypt.return_value = {"access_token": "token"}
+        with patch.object(engine.github_service, "get_file_content") as mock_get_content:
+            mock_get_content.return_value = {"content": "import sqlite3\ncursor.execute(query)\n", "encoding": "utf-8"}
+            result = engine.execute_review_engine(
+                mock_review.id,
+                db=mock_db,
+                repository_id="owner/repo",
+                ref="main",
+            )
+
+    assert result.status == "COMPLETED"
+    assert mock_rf.status == "COMPLETED"
+
+    # Verify Finding object creation and explicit field mappings
+    assert mock_db.add.call_count == 1
+    added_finding = mock_db.add.call_args[0][0]
+    assert added_finding.review_id == mock_review.id
+    assert added_finding.file_path == "src/app.py"
+    assert added_finding.line_number == 2
+    assert added_finding.severity == "CRITICAL"
+    assert added_finding.category == "SECURITY"
+    assert added_finding.title == "SQL Injection"
+    assert added_finding.message == "Unsanitized user query execution"
+    assert added_finding.suggestion == "Use parameterized query"
+
+
+def test_review_file_lifecycle_zero_findings_success() -> None:
+    engine = ReviewEngineService()
+    mock_gemini = MagicMock()
+    mock_gemini.analyze_code.return_value = {"findings": []}
+    engine.gemini_service = mock_gemini
+
+    mock_db = MagicMock()
+    mock_review = MagicMock()
+    mock_review.id = uuid.uuid4()
+    mock_review.status = "PROCESSING"
+    mock_rf = MagicMock(file_path="src/clean.py", status="PENDING")
+
+    mock_db.query.return_value.filter.return_value.first.side_effect = [
+        mock_review,
+        MagicMock(access_token_encrypted="enc"),
+    ]
+    mock_db.query.return_value.filter.return_value.all.return_value = [mock_rf]
+
+    with patch("app.services.review_engine.decrypt_credential_payload") as mock_decrypt:
+        mock_decrypt.return_value = {"access_token": "token"}
+        with patch.object(engine.github_service, "get_file_content") as mock_get_content:
+            mock_get_content.return_value = {"content": "print('clean code')\n", "encoding": "utf-8"}
+            result = engine.execute_review_engine(
+                mock_review.id,
+                db=mock_db,
+                repository_id="owner/repo",
+                ref="main",
+            )
+
+    assert result.status == "COMPLETED"
+    assert mock_rf.status == "COMPLETED"
+    assert mock_db.add.call_count == 0

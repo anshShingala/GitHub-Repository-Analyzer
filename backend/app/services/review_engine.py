@@ -124,6 +124,7 @@ class ReviewEngineService:
         # Preflight Check 4: Fetch Source Files Content In-Memory via GitHub API
         files_source: List[Dict[str, Any]] = []
         file_line_bounds: Dict[str, int] = {}
+        successful_review_files: List[ReviewFile] = []
 
         try:
             for rf in review_files:
@@ -145,6 +146,7 @@ class ReviewEngineService:
 
                 files_source.append({"path": path, "content": raw_content})
                 file_line_bounds[path] = len(raw_content.splitlines()) or 1
+                successful_review_files.append(rf)
         except Exception as exc:
             try:
                 db.rollback()
@@ -250,6 +252,9 @@ class ReviewEngineService:
             return review
 
         try:
+            for rf in successful_review_files:
+                rf.status = "COMPLETED"
+
             for item in validated_findings:
                 finding_obj = Finding(
                     id=uuid.uuid4(),
