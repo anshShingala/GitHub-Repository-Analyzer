@@ -442,3 +442,116 @@ def test_review_file_lifecycle_zero_findings_success() -> None:
     assert result.status == "COMPLETED"
     assert mock_rf.status == "COMPLETED"
     assert mock_db.add.call_count == 0
+
+
+# 17. Observability Logging & Rejection Diagnostic Verification
+def test_review_engine_observability_zero_raw_findings(caplog) -> None:
+    engine = ReviewEngineService()
+    mock_gemini = MagicMock()
+    mock_gemini.analyze_code.return_value = {"findings": []}
+    engine.gemini_service = mock_gemini
+
+    mock_db = MagicMock()
+    mock_review = MagicMock()
+    mock_review.id = uuid.uuid4()
+    mock_review.status = "PROCESSING"
+    mock_rf = MagicMock(file_path="a.py", status="PENDING")
+
+    mock_db.query.return_value.filter.return_value.first.side_effect = [
+        mock_review,
+        MagicMock(access_token_encrypted="enc"),
+    ]
+    mock_db.query.return_value.filter.return_value.all.return_value = [mock_rf]
+
+    with patch("app.services.review_engine.decrypt_credential_payload") as mock_decrypt:
+        mock_decrypt.return_value = {"access_token": "token"}
+        with patch.object(engine.github_service, "get_file_content") as mock_get_content:
+            mock_get_content.return_value = {"content": "code\n", "encoding": "utf-8"}
+            with caplog.at_level("INFO"):
+                result = engine.execute_review_engine(mock_review.id, db=mock_db, repository_id="o/r", ref="m")
+
+    assert result.status == "COMPLETED"
+    assert "raw_findings_count=0" in caplog.text
+    assert "Gemini returned zero findings" in caplog.text
+
+
+def test_review_engine_observability_rejected_raw_findings(caplog) -> None:
+    engine = ReviewEngineService()
+    mock_gemini = MagicMock()
+    mock_gemini.analyze_code.return_value = {
+        "findings": [
+            {
+                "file_path": "invalid_path.py",
+                "line_number": 1,
+                "severity": "HIGH",
+                "category": "BUG",
+                "title": "Invalid Path",
+                "message": "Msg",
+            }
+        ]
+    }
+    engine.gemini_service = mock_gemini
+
+    mock_db = MagicMock()
+    mock_review = MagicMock()
+    mock_review.id = uuid.uuid4()
+    mock_review.status = "PROCESSING"
+    mock_rf = MagicMock(file_path="valid_path.py", status="PENDING")
+
+    mock_db.query.return_value.filter.return_value.first.side_effect = [
+        mock_review,
+        MagicMock(access_token_encrypted="enc"),
+    ]
+    mock_db.query.return_value.filter.return_value.all.return_value = [mock_rf]
+
+    with patch("app.services.review_engine.decrypt_credential_payload") as mock_decrypt:
+        mock_decrypt.return_value = {"access_token": "token"}
+        with patch.object(engine.github_service, "get_file_content") as mock_get_content:
+            mock_get_content.return_value = {"content": "code\n", "encoding": "utf-8"}
+            with caplog.at_level("WARNING"):
+                result = engine.execute_review_engine(mock_review.id, db=mock_db, repository_id="o/r", ref="m")
+
+    assert result.status == "COMPLETED"
+    assert "rejection_reason='invalid_file_path'" in caplog.text
+    assert "all Gemini findings were rejected by validation rules" in caplog.text
+
+
+def test_review_engine_observability_valid_raw_findings(caplog) -> None:
+    engine = ReviewEngineService()
+    mock_gemini = MagicMock()
+    mock_gemini.analyze_code.return_value = {
+        "findings": [
+            {
+                "file_path": "valid_path.py",
+                "line_number": 1,
+                "severity": "HIGH",
+                "category": "BUG",
+                "title": "Valid Issue",
+                "message": "Msg",
+            }
+        ]
+    }
+    engine.gemini_service = mock_gemini
+
+    mock_db = MagicMock()
+    mock_review = MagicMock()
+    mock_review.id = uuid.uuid4()
+    mock_review.status = "PROCESSING"
+    mock_rf = MagicMock(file_path="valid_path.py", status="PENDING")
+
+    mock_db.query.return_value.filter.return_value.first.side_effect = [
+        mock_review,
+        MagicMock(access_token_encrypted="enc"),
+    ]
+    mock_db.query.return_value.filter.return_value.all.return_value = [mock_rf]
+
+    with patch("app.services.review_engine.decrypt_credential_payload") as mock_decrypt:
+        mock_decrypt.return_value = {"access_token": "token"}
+        with patch.object(engine.github_service, "get_file_content") as mock_get_content:
+            mock_get_content.return_value = {"content": "code\n", "encoding": "utf-8"}
+            with caplog.at_level("INFO"):
+                result = engine.execute_review_engine(mock_review.id, db=mock_db, repository_id="o/r", ref="m")
+
+    assert result.status == "COMPLETED"
+    assert "raw_findings_count=1" in caplog.text
+    assert "validated_findings_count=1" in caplog.text

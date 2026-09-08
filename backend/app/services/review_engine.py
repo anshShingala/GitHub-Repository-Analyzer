@@ -1,4 +1,5 @@
 import base64
+import logging
 from typing import Any, Dict, List, Tuple
 import uuid
 
@@ -10,6 +11,8 @@ from app.db.models import Finding, GitHubConnection, Review, ReviewFile, User, u
 from app.services.gemini import GeminiService
 from app.services.github import GitHubService
 from app.services.ownership import acquire_ownership, generate_worker_identity, verify_fencing
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_CATEGORIES = {"BUG", "SECURITY", "PERFORMANCE", "MAINTAINABILITY"}
 ALLOWED_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
@@ -189,6 +192,11 @@ class ReviewEngineService:
             return review
 
         raw_findings = gemini_response.get("findings", [])
+        raw_findings_count = len(raw_findings) if isinstance(raw_findings, list) else 0
+        logger.info(
+            f"Starting post-inference validation: review_id='{review.id}', "
+            f"raw_findings_count={raw_findings_count}"
+        )
 
         # Step C: Deterministic Post-Inference Validation & Normalization
         validated_findings: List[Dict[str, Any]] = []
@@ -196,6 +204,10 @@ class ReviewEngineService:
 
         for f in raw_findings:
             if not isinstance(f, dict):
+                logger.warning(
+                    f"Finding rejected: review_id='{review.id}', "
+                    f"rejection_reason='invalid_format_non_dict'"
+                )
                 continue
 
             file_path = str(f.get("file_path", "")).strip()
@@ -208,27 +220,48 @@ class ReviewEngineService:
 
             # Validation Rule 1: file_path must exist in target files
             if file_path not in file_line_bounds:
+                logger.warning(
+                    f"Finding rejected: review_id='{review.id}', file_path='{file_path}', "
+                    f"line_number={line_num}, category='{category}', severity='{severity}', "
+                    f"rejection_reason='invalid_file_path'"
+                )
                 continue
 
             # Validation Rule 2: line_number must be valid integer within file bounds
-            if not isinstance(line_num, int) or line_num <= 0:
-                continue
-            if line_num > file_line_bounds[file_path]:
+            if not isinstance(line_num, int) or line_num <= 0 or line_num > file_line_bounds[file_path]:
+                logger.warning(
+                    f"Finding rejected: review_id='{review.id}', file_path='{file_path}', "
+                    f"line_number={line_num}, category='{category}', severity='{severity}', "
+                    f"rejection_reason='invalid_line_number'"
+                )
                 continue
 
             # Validation Rule 3: Taxonomy enforcement
-            if category not in ALLOWED_CATEGORIES:
-                continue
-            if severity not in ALLOWED_SEVERITIES:
+            if category not in ALLOWED_CATEGORIES or severity not in ALLOWED_SEVERITIES:
+                logger.warning(
+                    f"Finding rejected: review_id='{review.id}', file_path='{file_path}', "
+                    f"line_number={line_num}, category='{category}', severity='{severity}', "
+                    f"rejection_reason='invalid_category_or_severity'"
+                )
                 continue
 
             # Validation Rule 4: Non-empty title and message
             if not title or not message:
+                logger.warning(
+                    f"Finding rejected: review_id='{review.id}', file_path='{file_path}', "
+                    f"line_number={line_num}, category='{category}', severity='{severity}', "
+                    f"rejection_reason='missing_title_or_message'"
+                )
                 continue
 
             # Deduplication Rule: Tuple (file_path, line_number, category, title)
             dedup_key = (file_path, line_num, category, title)
             if dedup_key in seen_dedup_keys:
+                logger.warning(
+                    f"Finding rejected: review_id='{review.id}', file_path='{file_path}', "
+                    f"line_number={line_num}, category='{category}', severity='{severity}', "
+                    f"rejection_reason='duplicate_finding'"
+                )
                 continue
             seen_dedup_keys.add(dedup_key)
 
@@ -241,6 +274,23 @@ class ReviewEngineService:
                 "message": message,
                 "suggestion": suggestion,
             })
+
+        validated_findings_count = len(validated_findings)
+        if raw_findings_count == 0:
+            logger.info(
+                f"Validation completed: review_id='{review.id}', Gemini returned zero findings. "
+                f"raw_findings_count=0, validated_findings_count=0"
+            )
+        elif validated_findings_count == 0:
+            logger.warning(
+                f"Validation completed: review_id='{review.id}', all Gemini findings were rejected by validation rules. "
+                f"raw_findings_count={raw_findings_count}, validated_findings_count=0"
+            )
+        else:
+            logger.info(
+                f"Validation completed: review_id='{review.id}', "
+                f"raw_findings_count={raw_findings_count}, validated_findings_count={validated_findings_count}"
+            )
 
         # Step D: AM-002 Worker Fencing Check & Findings Persistence
         if not verify_fencing(db, review, worker_id):
