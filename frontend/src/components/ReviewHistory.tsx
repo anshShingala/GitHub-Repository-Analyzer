@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, ReviewItem } from '@/lib/api';
-import { History, CheckCircle2, Clock, XCircle, ChevronLeft, ChevronRight, RefreshCw, Eye } from 'lucide-react';
+import { History, CheckCircle2, Clock, XCircle, ChevronLeft, ChevronRight, RefreshCw, Eye, Copy, Check } from 'lucide-react';
 
 export default function ReviewHistory({ refreshKey }: { refreshKey?: number }) {
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
@@ -13,6 +13,15 @@ export default function ReviewHistory({ refreshKey }: { refreshKey?: number }) {
   const limit = 10;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopyId = (id: string) => {
+    navigator.clipboard.writeText(id);
+    setCopiedId(id);
+    setTimeout(() => {
+      setCopiedId(null);
+    }, 2000);
+  };
 
   const fetchReviews = async () => {
     setLoading(true);
@@ -158,7 +167,24 @@ export default function ReviewHistory({ refreshKey }: { refreshKey?: number }) {
               reviews.map((r) => (
                 <tr key={r.id} className="hover:bg-slate-50 transition">
                   <td className="px-4 py-3 font-mono text-xs font-semibold text-slate-900">
-                    {r.id.substring(0, 8)}...
+                    <div className="flex items-center space-x-1.5" title={r.id}>
+                      <span className="truncate">{r.id.substring(0, 8)}...</span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyId(r.id)}
+                        className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded transition inline-flex items-center shrink-0"
+                        title={copiedId === r.id ? 'Copied!' : 'Copy full Review ID'}
+                      >
+                        {copiedId === r.id ? (
+                          <span className="inline-flex items-center text-emerald-600 text-[10px] font-sans font-medium space-x-0.5">
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Copied</span>
+                          </span>
+                        ) : (
+                          <Copy className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
                   </td>
                   <td className="px-4 py-3">{renderStatusBadge(r.status)}</td>
                   <td className="px-4 py-3 font-medium text-slate-900">{r.findings_count}</td>

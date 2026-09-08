@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { api, FindingItem, ReviewItem } from '@/lib/api';
-import { ShieldAlert, Filter, FileText, Bug, AlertTriangle, Zap, CheckCircle2, ChevronDown } from 'lucide-react';
+import { ShieldAlert, Filter, FileText, Bug, AlertTriangle, Zap, CheckCircle2, ChevronDown, Copy, Check } from 'lucide-react';
 
 export default function FindingsDashboard({ review }: { review: ReviewItem }) {
   const [findings, setFindings] = useState<FindingItem[]>([]);
@@ -12,6 +12,15 @@ export default function FindingsDashboard({ review }: { review: ReviewItem }) {
   const [severityFilter, setSeverityFilter] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyId = () => {
+    navigator.clipboard.writeText(review.id);
+    setCopied(true);
+    setTimeout(() => {
+      setCopied(false);
+    }, 2000);
+  };
 
   const fetchFindings = async () => {
     setLoading(true);
@@ -68,7 +77,24 @@ export default function FindingsDashboard({ review }: { review: ReviewItem }) {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center space-x-3">
-              <h2 className="text-xl font-bold text-slate-900">Review {review.id.substring(0, 8)}...</h2>
+              <div className="flex items-center space-x-2" title={review.id}>
+                <h2 className="text-xl font-bold text-slate-900">Review {review.id.substring(0, 8)}...</h2>
+                <button
+                  type="button"
+                  onClick={handleCopyId}
+                  className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded transition inline-flex items-center"
+                  title={copied ? 'Copied!' : 'Copy full Review ID'}
+                >
+                  {copied ? (
+                    <span className="inline-flex items-center text-emerald-600 text-xs font-sans font-medium space-x-1">
+                      <Check className="w-4 h-4" />
+                      <span>Copied</span>
+                    </span>
+                  ) : (
+                    <Copy className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
               <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
                 review.status === 'COMPLETED' ? 'bg-emerald-50 text-emerald-700 border-emerald-300' :
                 review.status === 'FAILED' ? 'bg-rose-50 text-rose-700 border-rose-300' :
