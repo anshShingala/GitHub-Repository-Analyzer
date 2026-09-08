@@ -15,7 +15,10 @@ export default function ReviewHistory({ refreshKey }: { refreshKey?: number }) {
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const handleCopyId = (id: string) => {
+  const handleCopyId = (id: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
     navigator.clipboard.writeText(id);
     setCopiedId(id);
     setTimeout(() => {
@@ -168,10 +171,15 @@ export default function ReviewHistory({ refreshKey }: { refreshKey?: number }) {
                 <tr key={r.id} className="hover:bg-slate-50 transition">
                   <td className="px-4 py-3 font-mono text-xs font-semibold text-slate-900">
                     <div className="flex items-center space-x-1.5" title={r.id}>
-                      <span className="truncate">{r.id.substring(0, 8)}...</span>
+                      <Link
+                        href={`/reviews/${r.id}`}
+                        className="truncate text-slate-900 hover:text-sky-600 hover:underline transition cursor-pointer"
+                      >
+                        {r.id.substring(0, 8)}...
+                      </Link>
                       <button
                         type="button"
-                        onClick={() => handleCopyId(r.id)}
+                        onClick={(e) => handleCopyId(r.id, e)}
                         className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded transition inline-flex items-center shrink-0"
                         title={copiedId === r.id ? 'Copied!' : 'Copy full Review ID'}
                       >
