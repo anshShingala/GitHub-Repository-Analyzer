@@ -10,7 +10,7 @@ from app.services.review_engine import ReviewEngineService
 
 @pytest.fixture
 def mock_gemini_service():
-    return GeminiService(api_key="test-gemini-key", model_name="gemini-2.5-flash")
+    return GeminiService(api_key="test-gemini-key", model_name="gemini-3.6-flash")
 
 
 # 1. Gemini Prompt Formatting & Prompt Injection Defense
@@ -32,14 +32,14 @@ def test_gemini_service_format_source_prompt(mock_gemini_service) -> None:
 
 # 2. Unconfigured Gemini API Key Fallback
 def test_gemini_service_analyze_code_unconfigured_fallback() -> None:
-    service = GeminiService(api_key="", model_name="gemini-2.5-flash")
+    service = GeminiService(api_key="", model_name="gemini-3.6-flash")
     result = service.analyze_code([{"path": "a.py", "content": "print(1)"}], ["BUG"])
     assert result == {"findings": []}
 
 
 # 3 & 12. Mocked Gemini Success & ONE-CALL Invariant
 def test_gemini_service_analyze_code_mocked_gemini_success() -> None:
-    service = GeminiService(api_key="mock-key", model_name="gemini-2.5-flash")
+    service = GeminiService(api_key="mock-key", model_name="gemini-3.6-flash")
     mock_findings = {
         "findings": [
             {
@@ -71,7 +71,7 @@ def test_gemini_service_analyze_code_mocked_gemini_success() -> None:
 
 # 4. Malformed JSON Response from Gemini
 def test_gemini_service_analyze_code_malformed_json_handling() -> None:
-    service = GeminiService(api_key="mock-key", model_name="gemini-2.5-flash")
+    service = GeminiService(api_key="mock-key", model_name="gemini-3.6-flash")
     mock_response = MagicMock()
     mock_response.text = "NOT_VALID_JSON"
 
@@ -89,7 +89,7 @@ def test_gemini_service_analyze_code_malformed_json_handling() -> None:
 
 # 4b. Gemini API Exception Handling
 def test_gemini_service_analyze_code_api_exception_handling() -> None:
-    service = GeminiService(api_key="mock-key", model_name="gemini-2.5-flash")
+    service = GeminiService(api_key="mock-key", model_name="gemini-3.6-flash")
 
     with patch("google.genai.Client") as mock_client_cls:
         mock_client_instance = MagicMock()
