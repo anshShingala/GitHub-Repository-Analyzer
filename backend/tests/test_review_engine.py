@@ -322,3 +322,31 @@ def test_review_engine_valid_repository_and_ref_used() -> None:
             )
             assert result.status == "COMPLETED"
 
+
+# 15. GEMINI_API_KEY Sanitization Tests
+def test_gemini_api_key_sanitization_normal_key() -> None:
+    service = GeminiService(api_key="valid_key_123")
+    assert service.api_key == "valid_key_123"
+
+
+def test_gemini_api_key_sanitization_trailing_newline() -> None:
+    service = GeminiService(api_key="valid_key_123\n")
+    assert service.api_key == "valid_key_123"
+
+
+def test_gemini_api_key_sanitization_leading_trailing_whitespace() -> None:
+    service = GeminiService(api_key=" \t  valid_key_123 \n\r ")
+    assert service.api_key == "valid_key_123"
+
+
+def test_gemini_api_key_sanitization_empty_key() -> None:
+    service = GeminiService(api_key="")
+    assert service.api_key == ""
+    service_none = GeminiService(api_key=None)
+    assert service_none.api_key == ""
+
+
+def test_gemini_api_key_sanitization_settings_fallback() -> None:
+    with patch("app.core.config.settings.GEMINI_API_KEY", "  key_from_settings\n "):
+        service = GeminiService(api_key=None)
+        assert service.api_key == "key_from_settings"

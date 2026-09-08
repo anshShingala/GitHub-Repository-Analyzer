@@ -41,7 +41,8 @@ class GeminiService:
     """Service wrapping Google Gemini AI API for structured automated code review."""
 
     def __init__(self, api_key: str | None = None, model_name: str | None = None) -> None:
-        self.api_key = api_key if api_key is not None else settings.GEMINI_API_KEY
+        raw_key = api_key if api_key is not None else settings.GEMINI_API_KEY
+        self.api_key = raw_key.strip() if raw_key else ""
         self.model_name = model_name if model_name is not None else settings.GEMINI_MODEL
 
     def format_source_prompt(
